@@ -61,7 +61,7 @@ export function httpRequestToEvent(request: Request): APIGatewayProxyEventV2 {
                 method: request.method,
                 path: request.path,
                 protocol: request.protocol,
-                sourceIp: request.ip,
+                sourceIp: request.ip!,
                 userAgent: request.header('User-Agent') ?? '',
             },
             accountId: '123456789012',

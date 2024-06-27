@@ -1,2 +1,8 @@
 node_modules
-src
+.git
+.github
+dist
+test
+Dockerfile
+.gitignore
+vitest.config.js
