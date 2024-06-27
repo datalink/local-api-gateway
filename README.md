@@ -35,7 +35,7 @@ services:
   
     # This container runs API Gateway locally
     web:
-        image: bref/local-api-gateway
+        image: sterliakov/local-api-gateway
         ports: ['8000:8000']
         environment:
             # <host>:<port> -> the host here is "php" because that's the name of the second container
@@ -48,6 +48,34 @@ services:
         command: public/index.php
         volumes:
             - .:/var/task:ro
+```
+
+Or with replicated setup:
+
+```yaml
+version: "3.5"
+
+services:
+  
+    # This container runs API Gateway locally
+    web:
+        image: sterliakov/local-api-gateway
+        ports: ['8000:8000']
+        environment:
+            # <host>:<port> -> the host here is "php" because that's the name of the second container
+            TARGET: 'php:8080'
+            TARGET_REPLICAS_COUNT: 3
+            
+    # Example of container running AWS Lambda locally
+    php:
+        image: bref/php-80-fpm
+        # The command should contain the Lambda handler
+        command: public/index.php
+        volumes:
+            - .:/var/task:ro
+        deploy:
+            mode: replicated
+            replicas: 3
 ```
 
 If you need to change the default listening port, you can set the `LISTEN_PORT` environment variable value to whatever port you wish to use.

@@ -8,13 +8,14 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-FROM build as runtime
+FROM base as runtime
 
 # Fake AWS credentials so that the Lambda client works
 ENV AWS_ACCESS_KEY_ID='fake'
 ENV AWS_SECRET_ACCESS_KEY='fake'
 
 WORKDIR /app
+COPY package.json package.json
 RUN npm install --production
 COPY --from=build /app/dist /app/dist
 

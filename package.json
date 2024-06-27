@@ -4,6 +4,7 @@
   "description": "Run API Gateway locally against your Docker Lambda functions",
   "repository": "brefphp/local-api-gateway",
   "main": "dist/index.js",
+  "type": "module",
   "files": [
     "dist"
   ],

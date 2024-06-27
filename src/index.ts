@@ -2,9 +2,10 @@ import express, { NextFunction, Request, Response } from 'express';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import queue from 'express-queue';
+import dns from 'dns';
 import { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { InvocationType, InvokeCommand, InvokeCommandOutput, LambdaClient } from '@aws-sdk/client-lambda';
-import { httpRequestToEvent } from './apiGateway';
+import { httpRequestToEvent } from './apiGateway.js';
 import bodyParser from 'body-parser';
 
 const app = express();
@@ -21,7 +22,7 @@ if (process.env.DOCUMENT_ROOT) {
 // See https://github.com/brefphp/bref/issues/1471
 const requestQueue = queue({
     // max requests to process simultaneously
-    activeLimit: 1,
+    activeLimit: process.env.TARGET_REPLICAS_COUNT ?? 1,
     // max requests in queue until reject (-1 means do not reject)
     queuedLimit: process.env.DEV_MAX_REQUESTS_IN_PARALLEL ?? 10,
     // handler to call when queuedLimit is reached (see below)
@@ -37,13 +38,25 @@ app.use(requestQueue);
 const target = process.env.TARGET;
 if (!target) {
     throw new Error(
-        'The TARGET environment variable must be set and contain the domain + port of the target lambda container (for example, "localhost:9000")'
+        'The TARGET environment variable must be set and contain the domain + port of the targets lambda container (for example, "localhost:9000")'
     );
 }
-const client = new LambdaClient({
-    region: 'us-east-1',
-    endpoint: `http://${target}`,
+
+const [host, targetPort] = target.split(":");
+const targets: string[] = await new Promise((resolve, reject)=>{
+    dns.resolve(host, (err, result) => {
+        if (err) reject()
+        else resolve(result);
+    });
 });
+
+const clients = targets.map((ip, index) => [index, new LambdaClient({
+    region: 'us-east-1',
+    endpoint: targetPort ? `http://${ip}:${targetPort}` : `http://${ip}`,
+})] as const);
+
+const buffer = new SharedArrayBuffer(parseInt(process.env.TARGET_REPLICAS_COUNT ?? '1'));
+const usageMap = new Uint8Array(buffer);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
@@ -62,19 +75,28 @@ app.use(bodyParser.raw({
 app.all('*', async (req: Request, res: Response, next) => {
     const event = httpRequestToEvent(req);
 
-    let result: InvokeCommandOutput;
-    try {
-        result = await client.send(
-            new InvokeCommand({
-                FunctionName: 'function',
-                Payload: Buffer.from(JSON.stringify(event)),
-                InvocationType: InvocationType.RequestResponse,
-            })
-        );
-    } catch (e) {
-        res.send(JSON.stringify(e));
-
-        return next(e);
+    let result: InvokeCommandOutput | null = null;
+    let err: string | null = null;
+    for (const [index, client] of clients) {
+        if (Atomics.add(usageMap, index, 1) > 0) {
+            continue;
+        }
+        try {
+            result = await client.send(
+                new InvokeCommand({
+                    FunctionName: 'function',
+                    Payload: Buffer.from(JSON.stringify(event)),
+                    InvocationType: InvocationType.RequestResponse,
+                })
+            );
+            Atomics.store(usageMap, index, 0);
+            break;
+        } catch (e) {
+            err ??= JSON.stringify(e);
+        }
+    }
+    if (result == null) {
+        return next(err ?? 'Fail');
     }
 
     if (!result.Payload) {
